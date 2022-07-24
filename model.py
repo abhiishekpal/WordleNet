@@ -3,7 +3,7 @@ import torch
 
 class DQNet(nn.Module):
     
-    def __init__(self, input_dim, output_dim):
+    def __init__(self, input_dim):
 
         super().__init__()
 
@@ -12,7 +12,7 @@ class DQNet(nn.Module):
                                 nn.ReLU(),
                                 nn.Linear(100, 50),
                                 nn.ReLU(),
-                                nn.Linear(50, output_dim))
+                                nn.Linear(50, 1))
         
         
 

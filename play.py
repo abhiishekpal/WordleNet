@@ -9,9 +9,11 @@ import tqdm
 import torch.nn as nn
 import torch
 
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter()
 
 REPLAY_MEMORY_SIZE = 5000
-MIN_REPLAY_MEMORY_SIZE = 1000
+MIN_REPLAY_MEMORY_SIZE = 500
 MINIBATCH_SIZE = 64
 DISCOUNT = 0.99
 UPDATE_TARGET_EVERY = 5
@@ -23,7 +25,7 @@ class Agent:
 
     def __init__(self, input_dimension, output_dimension) -> None:
          
-        self.model = DQNet(input_dimension, output_dimension)
+        self.model = DQNet(input_dimension)
         self.target_model = copy.deepcopy(self.model)
         self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
         self.loss_fn = nn.MSELoss()
@@ -54,7 +56,7 @@ class Agent:
                 current_states = current_states.cuda()
             current_qs_list = self.model(current_states)
             
-            new_current_states = np.array([transition[3] for transition in minibatch])
+            new_current_states = np.array([transition[2] for transition in minibatch])
             new_current_states = torch.tensor([item for item in new_current_states], dtype=torch.float)
             if torch.cuda.is_available():
                 new_current_states = new_current_states.cuda()
@@ -66,15 +68,14 @@ class Agent:
 
         X = []
         y = []
-        for index, (current_state, action, reward, new_current_state, done) in enumerate(minibatch):
+        for index, (current_state, reward, new_current_state, done) in enumerate(minibatch):
             if not done:
-                max_future_q = np.max(future_qs_list[index])
+                max_future_q = future_qs_list[index]
                 new_q = reward + DISCOUNT * max_future_q
             else:
-                new_q = reward
-            
-            current_qs =  current_qs_list[index]
-            current_qs[action] = new_q
+                new_q = np.array(reward, dtype=np.float32)
+
+            current_qs = new_q.reshape((1,1))
 
             X.append(current_state)
             y.append(current_qs)
@@ -125,33 +126,41 @@ if __name__=='__main__':
 
 
     for episodes in tqdm.tqdm(range(EPISODES)):
-
+        # print(episodes)
         episode_reward = 0
         step = 1
         env = Wordle()
         current_state = env.reset()
         done = False
         iter = 0
+        prev_reward = 0
         while not done:
-            
-            if np.random.random() > epsilon:
-                sort_action = np.argsort(agent.get_qs(current_state).cpu().numpy())[0]
-                for i in range(len(sort_action)):
-                    action = sort_action[i] 
-                    new_state, reward, done = env.step(action)
-                    if done == None:
-                        done = False
-                        continue
-                    else:
-                        break  
-                      
-            else:
-                action = np.random.randint(0, env.ACTION_SPACE_SIZE)
-                new_state, reward, done = env.step(action)
 
-            if done==None:
-                done = False
+            if np.random.random() > epsilon:
+                scores = []
+                for cand in (env.CANDIDATE_SPACE):
+                    for i in range(len(cand)):
+                        current_state[0][step-1][i] = ord(cand[i])-97 
+                        current_state[1][step-1][i] = ord(cand[i]) -97 
+                    scores.append(agent.get_qs(current_state).cpu().numpy())
+                action = np.argmax(scores)
+
+            else:
+                action = np.random.randint(0, len(env.CANDIDATE_SPACE))
+            
+            sel_word = list(env.CANDIDATE_SPACE.keys())[action]
+            if sel_word == env.goal_word:
+                break
+            
+            for i in range(len(sel_word)):
+                current_state[0][step-1][i] = ord(sel_word[i])-97 
+                current_state[1][step-1][i] = ord(sel_word[i]) -97 
+
+            new_state, reward, done = env.step(sel_word)
+            
+            if reward is None:
                 continue
+            
             rew = 0
             for itm in reward:
                 if itm  == -1:
@@ -160,21 +169,25 @@ if __name__=='__main__':
                     rew -= 2
                 else:
                     rew += 2
+            
             reward = rew
             if episodes%500==1:
-                print('Reward:', reward)
+                torch.save(agent.model.state_dict(), "wordle.pt")
+            # print('\t Reward:', reward)
             # reward = np.sum(reward) 
             
             episode_reward += reward
 
-            agent.update_replay_memory((current_state, action, reward, new_state, done))
+            agent.update_replay_memory((current_state, reward, new_state, done))
             agent.train(done)
 
             current_state = new_state
-
+            
             step += 1
             if step==7:
                 break
+        writer.add_scalar("Reward", episode_reward/step, episodes)
+        writer.add_scalar("Steps Taken", step, episodes)
         ep_rewards.append(episode_reward)
 
 
