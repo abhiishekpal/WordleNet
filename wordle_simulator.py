@@ -4,13 +4,14 @@ from nltk.corpus import words
 
 
 class Wordle:
-
+    ALL_WO = words.words()
+    random.shuffle(ALL_WO)
+    ALL_WORDS_OG = [wl.lower() for wl in ALL_WO]
     def __init__(self, size=(6, 5)) -> None: 
 
         self.size = size
-        word_list = words.words()
-        random.shuffle(word_list)
-        self.all_words = [wl.lower() for wl in word_list if len(wl)==size[1]][:1000]
+        self.all_words = [wl.lower() for wl in Wordle.ALL_WORDS_OG if len(wl)==size[1]][:100]
+        
         self.CANDIDATE_SPACE = {item: 1 for item in self.all_words.copy()}
         self.goal_word = random.choices(population=self.all_words, k=1)[0]
         self.visited_word = set()
@@ -28,6 +29,7 @@ class Wordle:
 
         if len(word) != self.size[1] or word not in self.all_words or word in self.visited_word:
             return []
+            
         # print('\t', word)
         self.visited_word.add(word)
         reward = [-1] * self.size[1]
@@ -46,15 +48,7 @@ class Wordle:
                 reward[i] = 0
                 wc[ord(word[i])-97] -= 1
 
-        # print('Reducing Candidate Space')
-        for wo in self.CANDIDATE_SPACE:
-            for i in range(len(wo)):
-                if reward[i]==1:
-                    if wo[i]!=word[i]:
-                        self.CANDIDATE_SPACE[wo] = 0
-                        break
-        self.CANDIDATE_SPACE = {key: 1 for key in self.CANDIDATE_SPACE if self.CANDIDATE_SPACE[key]==1 and key not in self.visited_word}
-        # print(self.CANDIDATE_SPACE)
+        
         self.reward_list.append(reward)
         self.word_list.append(word)
 
@@ -85,9 +79,9 @@ class Wordle:
 
         for i, word in enumerate(self.word_list):
             for j, w in enumerate(word):
-                new_state[0][i][j] = ord(w)
-        for i, reward in enumerate(self.reward_list):
-            for j, r in enumerate(reward):
+                new_state[0][i][j] = (ord(w)-97) / 26
+        for i, reward2 in enumerate(self.reward_list):
+            for j, r in enumerate(reward2):
                 new_state[1][i][j] = r
 
         return new_state, reward, len(self.word_list)==self.size[0]
