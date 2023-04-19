@@ -6,19 +6,24 @@ from nltk.corpus import words
 class Wordle:
     ALL_WO = words.words()
     random.shuffle(ALL_WO)
-    ALL_WORDS_OG = [wl.lower() for wl in ALL_WO]
+    # ALL_WORDS_OG = [wl.lower() for wl in ALL_WO]
+    ALL_WORDS_OG = []
+    with open('valid-wordle-words.txt', 'r') as fp:
+        for line in fp:
+            ALL_WORDS_OG.append(line.replace('\n', '').strip())
     def __init__(self, size=(6, 5)) -> None: 
 
         self.size = size
-        self.all_words = [wl.lower() for wl in Wordle.ALL_WORDS_OG if len(wl)==size[1]][:100]
-        
-        self.CANDIDATE_SPACE = {item: 1 for item in self.all_words.copy()}
+        self.all_words = [wl.lower() for wl in Wordle.ALL_WORDS_OG if len(wl)==size[1]]
+        self.CANDIDATE_SPACE = set(self.all_words)
         self.goal_word = random.choices(population=self.all_words, k=1)[0]
+
+        # print(self.goal_word)
         self.visited_word = set()
-        # print('Goal: ', self.goal_word)
+
+
         self.ACTION_SPACE_SIZE = len(self.all_words)
-        self.box = [['']*size[1]]*size[0]
-        self.scores = [[-1]*size[1]]*size[0]
+
         self.word_list = []
         self.reward_list = []
         self.word_count = {i: 0 for i in range(26)}
@@ -34,25 +39,25 @@ class Wordle:
         self.visited_word.add(word)
         reward = [-1] * self.size[1]
         wc = self.word_count.copy()
-        correct_word = ""
         for i in range(self.size[1]):
             if word[i] == self.goal_word[i]:
-                correct_word += word[i]
                 reward[i] = 1
                 wc[ord(word[i])-97] -= 1
-            else:
-                correct_word += '*'
         
         for i in range(self.size[1]):
             if reward[i]==-1 and word[i] in self.goal_word and wc[ord(word[i])-97]:
-                reward[i] = 0
+                reward[i] = 0.5
                 wc[ord(word[i])-97] -= 1
 
-        
-        self.reward_list.append(reward)
-        self.word_list.append(word)
-
         return reward
+
+    def get_candidate_vec(self, aword):
+
+        new_state  = np.zeros((1, 26, 5))
+        for j, w in enumerate(aword):
+            new_state[0][(ord(w)-97)][j] = 1
+
+        return new_state
 
     def show_board(self):
         for wl in self.word_list:
@@ -63,27 +68,21 @@ class Wordle:
         print('-----\n'*4)
 
     def reset(self):
-        current_state  = np.zeros(tuple([2])+self.size)
+        current_state  = np.zeros((1, 26, 5))
         self.visited_word = set()
         return current_state
 
-    def step(self, aword):
+    def step(self, aword, prev_state):
         
-        l2 = len(self.reward_list)
         reward = self.action(aword)
-
-        if len(self.reward_list)==l2:
-            return None, None, None
-
-        new_state  = np.zeros(tuple([2])+self.size)
-
-        for i, word in enumerate(self.word_list):
-            for j, w in enumerate(word):
-                new_state[0][i][j] = (ord(w)-97) / 26
-        for i, reward2 in enumerate(self.reward_list):
-            for j, r in enumerate(reward2):
-                new_state[1][i][j] = r
-
+        new_state  = prev_state.copy() 
+        for j, w in enumerate(aword):
+            if new_state[0][(ord(w)-97)][j]==0:
+                 new_state[0][(ord(w)-97)][j] = reward[j]
+            else:
+                new_state[0][(ord(w)-97)][j] = max(prev_state[0][ord(w)-97][j], reward[j])
+       
+       
         return new_state, reward, len(self.word_list)==self.size[0]
         
         

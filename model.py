@@ -7,8 +7,7 @@ class DQNet(nn.Module):
 
         super().__init__()
 
-        self.conv1 = nn.Sequential(nn.Conv2d(in_channels=1, out_channels=20, kernel_size=(1, 1), stride=1, padding=(0, 0)))
-        self.dense1 = nn.Sequential(nn.Linear(20*input_dim[0]*input_dim[1]*2, 500), 
+        self.dense1 = nn.Sequential(nn.Linear(260, 500), 
                                 nn.ReLU(),
                                 nn.Linear(500, 200),
                                 nn.ReLU(),
@@ -19,11 +18,7 @@ class DQNet(nn.Module):
         
 
     def forward(self, x):
-      
-        x1 = self.conv1(x)
 
-        x1 = torch.flatten(x1, 1)
-
-        y = self.dense1(x1)
+        y = self.dense1(x)
 
         return y

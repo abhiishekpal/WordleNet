@@ -10,28 +10,28 @@ import torch.nn as nn
 import torch
 
 import random
-random.seed(0)
+# random.seed(0)
 from torch.utils.tensorboard import SummaryWriter
-writer = SummaryWriter()
+
 
 REPLAY_MEMORY_SIZE = 500
 MIN_REPLAY_MEMORY_SIZE = 100
 MINIBATCH_SIZE = 64
-DISCOUNT = 0.5
-UPDATE_TARGET_EVERY = 100
-EPISODES = 20000
+DISCOUNT = 0.99
+UPDATE_TARGET_EVERY = 500
+EPISODES = 30000
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class Agent:
 
     def __init__(self, input_dimension, output_dimension) -> None:
-         
+        
         self.model = DQNet(input_dimension)
         self.target_model = copy.deepcopy(self.model)
         self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
         self.loss_fn = nn.MSELoss()
-        self.optimizer = torch.optim.Adam(params=self.model.parameters(), lr=1e-3)
+        self.optimizer = torch.optim.Adam(params=self.model.parameters(), lr=1e-4)
         if torch.cuda.is_available():
             self.model.cuda()
             self.target_model.cuda()
@@ -53,30 +53,25 @@ class Agent:
 
         self.model.eval()
         with torch.no_grad():    
-            current_states = np.array([reshape_array(transition[0]) for transition in minibatch] )
-            current_states = torch.tensor([item for item in current_states], dtype=torch.float)
+            current_states = np.array([fuse_array(transition[0], transition[1]) for transition in minibatch] )
+            current_states = torch.tensor([current_states], dtype=torch.float)
             if torch.cuda.is_available():
                 current_states = current_states.cuda()
             current_qs_list = self.model(current_states)
             
             future_qs_list = []
             for transition in minibatch:
-                step = transition[6]
-                if step==6:
-                    step -= 1
                 temp = []
                 for all_words in transition[4]:
-                    arr = transition[2].copy()
-                    for i in range(len(all_words)):
-                        if all_words in transition[5]:
+                    if all_words in transition[5]:
                             continue
-                        arr[0][step][i] = (ord(all_words[i])-97) / 26 
-                        arr[1][step][i] = 0
-                        arr2 = np.array(arr)
-                        temp.append(arr2)
+                    new_state  = np.zeros(transition[0].shape)
+                    for j, w in enumerate(all_words):
+                        new_state[0][(ord(w)-97)][j] = 1
+                    temp.append(new_state)
 
                 temp = np.array(temp)
-                new_current_states = torch.tensor([reshape_array(item) for item in temp], dtype=torch.float)
+                new_current_states = torch.tensor([fuse_array(transition[0], item) for item in temp], dtype=torch.float)
                 if torch.cuda.is_available():
                     new_current_states = new_current_states.cuda()
 
@@ -87,7 +82,7 @@ class Agent:
 
         X = []
         y = []
-        for index, (current_state, reward, new_current_state, done, cs, vw, st) in enumerate(minibatch):
+        for index, (current_state, candidate_vec, reward, done, cs, vw, st) in enumerate(minibatch):
             if not done and st<6:
                 max_future_q = np.max(future_qs_list[index])
                 new_q = reward + DISCOUNT * max_future_q
@@ -96,7 +91,7 @@ class Agent:
 
             current_qs = new_q.reshape((1))
 
-            X.append(reshape_array(current_state))
+            X.append(fuse_array(current_state, candidate_vec))
             y.append(current_qs)
 
         X = torch.tensor([itm for itm in X], dtype=torch.float)
@@ -132,10 +127,15 @@ class Agent:
             return self.model(state)
 
 
-def reshape_array(arr):
-    temp = arr.reshape(*arr.shape[:-2], -1)
-    temp = np.expand_dims(temp, axis=0)
-    return temp
+def fuse_array(arr1, arr2):
+
+    arr1 = arr1.flatten()
+    arr2 = arr2.flatten()
+
+    arr = np.concatenate((arr1, arr2), axis=0)
+
+    return arr
+
 
 def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon):
 
@@ -161,14 +161,16 @@ def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon):
 
 if __name__=='__main__':
 
+    writer = SummaryWriter()
     env = Wordle()
-    agent = Agent(env.size, env.ACTION_SPACE_SIZE)
+    agent = Agent((36, 28), env.ACTION_SPACE_SIZE)
     ep_rewards = [-200]
 
     total_step = 0
 
     for episodes in tqdm.tqdm(range(EPISODES)):
         # print(episodes)
+        
         episode_reward = 0
         step = 1
         env = Wordle()
@@ -177,27 +179,25 @@ if __name__=='__main__':
         iter = 0
         prev_reward = 0
         visited_word = set()
-        epsilon, decay_period, warmup_steps = 0.3, 25000, 500
-        print('--'*4)
-        print(env.goal_word)
-        print('--'*4)
+        epsilon, decay_period, warmup_steps = 0.01, 5, 3
+        # print('--'*4)
+        # print(env.goal_word)
+        # print('--'*4)
+        cand_space = list(env.CANDIDATE_SPACE)
+        decaying_epsilon = linearly_decaying_epsilon(decay_period, episodes, warmup_steps, epsilon)
+        # print('decaying epsilon: ', decaying_epsilon)
         while not done:
             total_step += 1
-            decaying_epsilon = linearly_decaying_epsilon(decay_period, total_step, warmup_steps, epsilon)
-            subspace = list(set(env.CANDIDATE_SPACE).difference(visited_word))
+            random.shuffle(cand_space)
+            subspace = list(set(cand_space[:20]+[env.goal_word]).difference(visited_word))
             random.shuffle(subspace)
-            subspace = list(set(subspace[:15] + [env.goal_word]))
-
-            if np.random.random() > 0.1:#decaying_epsilon:
-                scores = []
-                visited_word2 = set()                
+    
+            if np.random.random() > decaying_epsilon:
+                scores = []                
                 for cand in (subspace):
-                    visited_word2.add(cand)
-                    for i in range(len(cand)):
-                        current_state[0][step-1][i] = (ord(cand[i])-97) / 26 
-                        current_state[1][step-1][i] = 0
-                    cs = reshape_array(current_state)
-                    scores.append(agent.get_qs(cs).cpu().numpy())
+                    candidate_vec = env.get_candidate_vec(cand)
+                    cs = fuse_array(current_state, candidate_vec)
+                    scores.append(agent.get_qs((cs)).cpu().numpy())
                 action = np.argmax(scores)
             else:
                 action = np.random.randint(0, len(subspace))
@@ -205,61 +205,46 @@ if __name__=='__main__':
 
             sel_word = list(subspace)[action]
             visited_word.add(sel_word)
-
-            for i in range(len(sel_word)):
-                current_state[0][step-1][i] = (ord(sel_word[i])-97) / 26 
-                current_state[1][step-1][i] = 0
-
+            candidate_vec = env.get_candidate_vec(sel_word)
             if sel_word == env.goal_word:
                 reward, done = 1, 1
-                new_state, _ , _ = env.step(sel_word)
-                agent.update_replay_memory((current_state, reward, new_state, done, subspace, visited_word.copy(), step))
+                new_state, _, _ = env.step(sel_word, current_state)
+                
+                agent.update_replay_memory((current_state, candidate_vec, reward, done, subspace, visited_word.copy(), step))
                 agent.train(done)
                 episode_reward += reward
+                # print(sel_word)
                 break
 
-            new_state, reward, done = env.step(sel_word)
+            new_state, reward, done = env.step(sel_word, current_state)
 
             if reward is None:
                 continue
             
-           
+            # rew = [1  if itm>2 else 0 for itm in reward]
+            reward = np.mean(reward)
 
-            rew = 0
-            for itm in reward:
-                if itm  == -1:
-                    rew -= 1
-                elif itm == 0:
-                    rew -=0.1
-                else:
-                    rew += 1
-            
-          
-            reward = rew/len(reward)
-            
-            print(sel_word, rew, reward)
-            # if reward<0:
-            #     reward = 0
-            # else:
-            #     reward = 1
+            # print(sel_word, rew, reward)
+            # print(new_state)
 
-            if episodes%250==1:
-                torch.save(agent.model.state_dict(), "wordle2.pt")
+            if episodes%50==1:
+                torch.save(agent.model.state_dict(), "wordle-densev4.7.pt")
             
             episode_reward += reward
               
-            agent.update_replay_memory((current_state, reward, new_state, done, subspace, visited_word.copy(), step))
+            agent.update_replay_memory((current_state, candidate_vec, reward, done, subspace, visited_word.copy(), step))
             agent.train(done)
 
-            current_state = new_state
+            current_state = new_state.copy()
             
             step += 1
             if step==7:
                 break
-
-        print('--'*4)
+        # break
+        # print('--'*4)
         writer.add_scalar("Reward", episode_reward/step, episodes)
         writer.add_scalar("Steps Taken", step, episodes)
+        writer.add_scalar("Epsilon", decaying_epsilon, episodes)
         ep_rewards.append(episode_reward)
 
 
