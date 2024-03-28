@@ -88,7 +88,6 @@ class Agent:
                     temp.append(new_state)
 
                 new_current_states = torch.concat([fuse_array(transition[0][2], item) for item in temp], dim=0).type(torch.float).to(self.device)
-                print("new_current_states shape:", new_current_states.shape)
                 future_qs_list.append(self.target_model(new_current_states))
             
         future_qs_list = [item.cpu().numpy() for item in future_qs_list]
@@ -103,17 +102,15 @@ class Agent:
             current_qs = new_q.reshape((1))
 
             X.append(fuse_array(state_tuple[0], state_tuple[1]))
-            y.append(current_qs)
+            y.append(torch.tensor(current_qs))
 
 
         # train over the newly created input features ad output
-        X = torch.tensor([itm for itm in X], dtype=torch.float).to(self.device)
-        y = torch.tensor([itm for itm in y], dtype=torch.float).to(self.device)
-        
+        X = torch.concat([itm for itm in X], dim=0).type(torch.float32).to(self.device)
+        y = torch.concat([itm for itm in y], dim=0).type(torch.float32).to(self.device)
         self.model.train()
-        print(X.shape)
         output = self.model(X)
-        loss = self.loss_fn(output, y)
+        loss = self.loss_fn(output.squeeze(), y)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
