@@ -21,20 +21,41 @@ DISCOUNT = 0.99
 UPDATE_TARGET_EVERY = 500
 EPISODES = 30000
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Define helper functions that are to be used
+def fuse_array(arr1, arr2):
+    arr1 = torch.tensor(arr1)
+    arr2 = torch.tensor(arr2)
+    arr1 = torch.flatten(arr1, start_dim=1)
+    arr2 = torch.flatten(arr2, start_dim=1)
+    arr = torch.concat([arr1, arr2], dim=1)
+    return arr
+
+def get_candidate_vec(aword):
+
+    new_state  = np.zeros((1, 26, 5))
+    for j, w in enumerate(aword):
+        new_state[0][(ord(w)-97)][j] = 1
+
+    return new_state
+
 
 class Agent:
 
-    def __init__(self, input_dimension, output_dimension) -> None:
+    """
+    Agene that interacts with the game, suggests actions and updates its understanding
+    """
+
+    def __init__(self) -> None:
         
-        self.model = DQNet(input_dimension)
+        self.model = DQNet()
         self.target_model = copy.deepcopy(self.model)
         self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
         self.loss_fn = nn.MSELoss()
-        self.optimizer = torch.optim.Adam(params=self.model.parameters(), lr=1e-4)
-        if torch.cuda.is_available():
-            self.model.cuda()
-            self.target_model.cuda()
+        self.optimizer = torch.optim.Adam(params=self.model.parameters(), lr=1e-3)
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model = self.model.to(self.device)
+        self.target_model = self.target_model.to(self.device)
         self.target_update_counter = 0
 
     def update_replay_memory(self, transition):
@@ -47,42 +68,32 @@ class Agent:
         if len(self.replay_memory) < MIN_REPLAY_MEMORY_SIZE:
             return
         
+        # generate a sample of length MINIBATCH_SIZE from our queue of inputs for training on
         minibatch = random.sample(self.replay_memory, MINIBATCH_SIZE)
-        # print(len(self.replay_memory) , MIN_REPLAY_MEMORY_SIZE, len(minibatch))
-        # (current_state, reward, new_state, done, subspace, visited_word.copy(), step)
 
+        # each transition in minibatch contains: (current_state, selected_vec, new_state), reward, done, subspace, visited_word.copy(), step)
+     
         self.model.eval()
-        with torch.no_grad():    
-            current_states = np.array([fuse_array(transition[0], transition[1]) for transition in minibatch] )
-            current_states = torch.tensor([current_states], dtype=torch.float)
-            if torch.cuda.is_available():
-                current_states = current_states.cuda()
-            current_qs_list = self.model(current_states)
-            
+        with torch.inference_mode():
+
             future_qs_list = []
             for transition in minibatch:
                 temp = []
-                for all_words in transition[4]:
-                    if all_words in transition[5]:
+                for all_words in transition[3]:
+                    if all_words in transition[4]:
                             continue
-                    new_state  = np.zeros(transition[0].shape)
+                    new_state  = np.zeros(transition[0][0].shape)
                     for j, w in enumerate(all_words):
                         new_state[0][(ord(w)-97)][j] = 1
                     temp.append(new_state)
 
-                temp = np.array(temp)
-                new_current_states = torch.tensor([fuse_array(transition[0], item) for item in temp], dtype=torch.float)
-                if torch.cuda.is_available():
-                    new_current_states = new_current_states.cuda()
-
+                new_current_states = torch.concat([fuse_array(transition[0][2], item) for item in temp], dim=0).type(torch.float).to(self.device)
+                print("new_current_states shape:", new_current_states.shape)
                 future_qs_list.append(self.target_model(new_current_states))
             
         future_qs_list = [item.cpu().numpy() for item in future_qs_list]
-        current_qs_list = current_qs_list.cpu().numpy()
-
-        X = []
-        y = []
-        for index, (current_state, candidate_vec, reward, done, cs, vw, st) in enumerate(minibatch):
+        X, y = [], []
+        for index, (state_tuple, reward, done, cs, vw, st) in enumerate(minibatch):
             if not done and st<6:
                 max_future_q = np.max(future_qs_list[index])
                 new_q = reward + DISCOUNT * max_future_q
@@ -91,26 +102,26 @@ class Agent:
 
             current_qs = new_q.reshape((1))
 
-            X.append(fuse_array(current_state, candidate_vec))
+            X.append(fuse_array(state_tuple[0], state_tuple[1]))
             y.append(current_qs)
 
-        X = torch.tensor([itm for itm in X], dtype=torch.float)
-        y = torch.tensor([itm for itm in y], dtype=torch.float)
+
+        # train over the newly created input features ad output
+        X = torch.tensor([itm for itm in X], dtype=torch.float).to(self.device)
+        y = torch.tensor([itm for itm in y], dtype=torch.float).to(self.device)
         
         self.model.train()
-        self.optimizer.zero_grad()
-        if torch.cuda.is_available():
-            X = X.cuda()
-            y = y.cuda()
+        print(X.shape)
         output = self.model(X)
         loss = self.loss_fn(output, y)
+        self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        self.optimizer.zero_grad()
 
         if terminal_state:
             self.target_update_counter += 1
         
+        # update our target model (policy model) to the trained model
         if self.target_update_counter > UPDATE_TARGET_EVERY:
             torch.save(self.model.state_dict(), 'model2.pth')
             self.target_model = copy.deepcopy(self.model)
@@ -118,23 +129,10 @@ class Agent:
 
     def get_qs(self, state):
         self.model.eval()
-        with torch.no_grad():
-            state = torch.tensor([itm for itm in state], dtype=torch.float)
-            state = state.unsqueeze(0)
-            
-            if torch.cuda.is_available():
-                state = state.cuda()
+        with torch.inference_mode():
+            state = state.type(torch.float).to(self.device)
+            state = state.unsqueeze(dim=0)
             return self.model(state)
-
-
-def fuse_array(arr1, arr2):
-
-    arr1 = arr1.flatten()
-    arr2 = arr2.flatten()
-
-    arr = np.concatenate((arr1, arr2), axis=0)
-
-    return arr
 
 
 def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon):
@@ -159,93 +157,80 @@ def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon):
     return epsilon + bonus
 
 
+
 if __name__=='__main__':
 
     writer = SummaryWriter()
     env = Wordle()
-    agent = Agent((36, 28), env.ACTION_SPACE_SIZE)
-    ep_rewards = [-200]
-
-    total_step = 0
+    agent = Agent()
 
     for episodes in tqdm.tqdm(range(EPISODES)):
-        # print(episodes)
-        
+
+        # tracking rewards for each game 
         episode_reward = 0
-        step = 1
-        env = Wordle()
+
+        # Reset the board state and empty the visited word list
         current_state = env.reset()
-        done = False
-        iter = 0
-        prev_reward = 0
         visited_word = set()
-        epsilon, decay_period, warmup_steps = 0.01, 5, 3
-        # print('--'*4)
-        # print(env.goal_word)
-        # print('--'*4)
+        
+
+        # select a random candidate space from the large space of words for each game
         cand_space = list(env.CANDIDATE_SPACE)
+
+        # fix a decaying epsilon for each game
+        epsilon, decay_period, warmup_steps = 0.01, 5, 3
         decaying_epsilon = linearly_decaying_epsilon(decay_period, episodes, warmup_steps, epsilon)
-        # print('decaying epsilon: ', decaying_epsilon)
-        while not done:
-            total_step += 1
+
+        # starting stepping in the game
+        step = 1
+        while(1):
             random.shuffle(cand_space)
             subspace = list(set(cand_space[:20]+[env.goal_word]).difference(visited_word))
             random.shuffle(subspace)
-    
+
+            # choosing the best word with some randomness added
             if np.random.random() > decaying_epsilon:
                 scores = []                
                 for cand in (subspace):
-                    candidate_vec = env.get_candidate_vec(cand)
-                    cs = fuse_array(current_state, candidate_vec)
-                    scores.append(agent.get_qs((cs)).cpu().numpy())
+                    candidate_vec = get_candidate_vec(cand)
+                    fused_state = fuse_array(current_state, candidate_vec)
+                    scores.append(agent.get_qs((fused_state)).cpu().numpy())
                 action = np.argmax(scores)
             else:
                 action = np.random.randint(0, len(subspace))
             
+            # create the vector for the chosen word
+            current_selected_word = list(subspace)[action]
+            visited_word.add(current_selected_word) 
+            candidate_vec = get_candidate_vec(current_selected_word)
 
-            sel_word = list(subspace)[action]
-            visited_word.add(sel_word)
-            candidate_vec = env.get_candidate_vec(sel_word)
-            if sel_word == env.goal_word:
-                reward, done = 1, 1
-                new_state, _, _ = env.step(sel_word, current_state)
-                
-                agent.update_replay_memory((current_state, candidate_vec, reward, done, subspace, visited_word.copy(), step))
-                agent.train(done)
-                episode_reward += reward
-                # print(sel_word)
+            # if the chosen word is infact the goal word we update the memory with the states and reward, train a step and terminate
+            if current_selected_word == env.goal_word:
+                new_state, _ = env.step(current_selected_word, current_state)
+                agent.update_replay_memory(((current_state, candidate_vec, new_state), reward, done, subspace, visited_word.copy(), step))
+                agent.train(1)
+                episode_reward += 1
                 break
 
-            new_state, reward, done = env.step(sel_word, current_state)
-
-            if reward is None:
-                continue
+            new_state, reward = env.step(current_selected_word, current_state)
             
-            # rew = [1  if itm>2 else 0 for itm in reward]
+            done = 1 if step==6 else 0
             reward = np.mean(reward)
-
-            # print(sel_word, rew, reward)
-            # print(new_state)
-
-            if episodes%50==1:
-                torch.save(agent.model.state_dict(), "wordle-densev4.7.pt")
-            
             episode_reward += reward
-              
-            agent.update_replay_memory((current_state, candidate_vec, reward, done, subspace, visited_word.copy(), step))
+            agent.update_replay_memory(((current_state, candidate_vec, new_state), reward, done, subspace, visited_word.copy(), step))
             agent.train(done)
-
             current_state = new_state.copy()
             
-            step += 1
-            if step==7:
+            # break if we are exceeing 6 steps (which is also wordle rule)
+            if step==6:
                 break
-        # break
-        # print('--'*4)
+            step += 1
+            if episodes%50==1:
+                torch.save(agent.model.state_dict(), "wordle-densev4.7.pt")
+
         writer.add_scalar("Reward", episode_reward/step, episodes)
         writer.add_scalar("Steps Taken", step, episodes)
-        writer.add_scalar("Epsilon", decaying_epsilon, episodes)
-        ep_rewards.append(episode_reward)
+
 
 
 
