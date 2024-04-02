@@ -1,43 +1,36 @@
 
 import torch
 from wordle_simulator import Wordle
-from model import DQNet
-from play import Agent
+from play import Agent, fuse_array, get_candidate_vec
 import numpy as np
 
 import torch
 import tqdm
 import random
+import json
  
 
 env = Wordle()
-input_dimension, output_dimension = env.size, env.ACTION_SPACE_SIZE
 
-agent = Agent(env.size, env.ACTION_SPACE_SIZE)
-model = DQNet(input_dimension)
-model.load_state_dict(torch.load('./wordle-densev4.0.pt'))
-
-model.eval()
-
-done = False
-
-step = 1
-
-def reshape_array(arr):
-
-    return arr
-    temp = arr.reshape(*arr.shape[:-2], -1)
-    temp = np.expand_dims(temp, axis=0)
-    return temp
+agent = Agent()
+agent.model.load_state_dict(torch.load('wordle-densev4.7.pt'))
 
 
-with torch.no_grad():
-    
+total_solved = 0
+steps_transitioned = {}
+for iter in range(100):  
+    done = False
+    step = 1
     current_state = env.reset()
     visited_word = set()
     print(env.goal_word)
     print('----')
-    subspace = list(set(env.CANDIDATE_SPACE))[:20]
+    steps_transitioned[iter] = {"goal": env.goal_word, "steps": []}
+    candidates = list(env.CANDIDATE_SPACE)
+    random.shuffle(candidates)
+    subspace = candidates[:50]
+
+    
     while not done:
 
         scores = []
@@ -47,23 +40,25 @@ with torch.no_grad():
         random.shuffle(subspace2)
 
         for cand in (subspace2):
-            temp_state = env.create_state(cand)
-            print(temp_state)
-            cs = reshape_array(temp_state)
-            scores.append(agent.get_qs(cs).cpu().numpy())
-            print(cand, '----> ', scores[-1])
+            candidate_vec = get_candidate_vec(cand)
+            fused_state = fuse_array(current_state, candidate_vec)
+            scores.append(agent.get_qs((fused_state)).cpu().numpy())
         action = np.argmax(scores)
-        
-        sel_word = list(subspace2)[action]
-        visited_word.add(sel_word)
+        current_selected_word = list(subspace2)[action]
+        visited_word.add(current_selected_word)
 
-        print(sel_word, step)
-        new_state, _, _ = env.step(sel_word)
+        print(current_selected_word, step)
+        new_state, _ = env.step(current_selected_word, current_state)
         current_state = new_state.copy()
-        if sel_word==env.goal_word:
+        steps_transitioned[iter]["steps"].append(current_selected_word)
+        if current_selected_word==env.goal_word:
+            total_solved += 1
             break
         step += 1
         if step==7:
             break
+print(f"Solved_percentage: {total_solved/len(steps_transitioned)*100}")
+with open("results.json", "w") as fp:
+    json.dump(steps_transitioned, fp)
 
-    
+  

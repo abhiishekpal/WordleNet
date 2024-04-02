@@ -17,7 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 REPLAY_MEMORY_SIZE = 500
 MIN_REPLAY_MEMORY_SIZE = 100
 MINIBATCH_SIZE = 64
-DISCOUNT = 0.99
+DISCOUNT = 0.5
 UPDATE_TARGET_EVERY = 500
 EPISODES = 30000
 
@@ -204,16 +204,16 @@ if __name__=='__main__':
             # if the chosen word is infact the goal word we update the memory with the states and reward, train a step and terminate
             if current_selected_word == env.goal_word:
                 new_state, _ = env.step(current_selected_word, current_state)
-                agent.update_replay_memory(((current_state, candidate_vec, new_state), reward, done, subspace, visited_word.copy(), step))
+                agent.update_replay_memory(((current_state, candidate_vec, new_state), 1, done, subspace, visited_word.copy(), step))
                 agent.train(1)
-                episode_reward += 1
+                episode_reward = 1
                 break
 
             new_state, reward = env.step(current_selected_word, current_state)
             
             done = 1 if step==6 else 0
             reward = np.mean(reward)
-            episode_reward += reward
+            episode_reward = reward
             agent.update_replay_memory(((current_state, candidate_vec, new_state), reward, done, subspace, visited_word.copy(), step))
             agent.train(done)
             current_state = new_state.copy()
@@ -225,7 +225,7 @@ if __name__=='__main__':
             if episodes%50==1:
                 torch.save(agent.model.state_dict(), "wordle-densev4.7.pt")
 
-        writer.add_scalar("Reward", episode_reward/step, episodes)
+        writer.add_scalar("Reward", episode_reward, episodes)
         writer.add_scalar("Steps Taken", step, episodes)
 
 

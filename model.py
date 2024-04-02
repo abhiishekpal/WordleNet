@@ -7,13 +7,13 @@ class DQNet(nn.Module):
 
         super().__init__()
 
-        self.dense1 = nn.Sequential(nn.Linear(260, 500), 
+        self.dense1 = nn.Sequential(nn.Linear(260, 1500), 
                                 nn.ReLU(),
-                                nn.Linear(500, 200),
+                                nn.Linear(1500, 512),
                                 nn.ReLU(),
-                                nn.Linear(200, 50),
+                                nn.Linear(512, 128),
                                 nn.ReLU(),
-                                nn.Linear(50, 1))
+                                nn.Linear(128, 1))
         
         
 
