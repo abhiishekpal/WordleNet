@@ -17,7 +17,7 @@ from torch.utils.tensorboard import SummaryWriter
 REPLAY_MEMORY_SIZE = 500
 MIN_REPLAY_MEMORY_SIZE = 100
 MINIBATCH_SIZE = 64
-DISCOUNT = 0.5
+DISCOUNT = 0.99
 UPDATE_TARGET_EVERY = 500
 EPISODES = 100000
 
@@ -175,14 +175,14 @@ if __name__=='__main__':
         cand_space = list(env.CANDIDATE_SPACE)
 
         # fix a decaying epsilon for each game
-        epsilon, decay_period, warmup_steps = 0.01, 5, 3
+        epsilon, decay_period, warmup_steps = 0.2, 5, 3
         decaying_epsilon = linearly_decaying_epsilon(decay_period, episodes, warmup_steps, epsilon)
 
         # starting stepping in the game
         step = 1
         while(1):
             random.shuffle(cand_space)
-            subspace = list(set(cand_space[:50]+[env.goal_word]).difference(visited_word))
+            subspace = list(set(cand_space[:20]+[env.goal_word]).difference(visited_word))
             random.shuffle(subspace)
 
             # choosing the best word with some randomness added
@@ -206,7 +206,7 @@ if __name__=='__main__':
             # if the chosen word is infact the goal word we update the memory with the states and reward, train a step and terminate
             if current_selected_word == env.goal_word:
                 new_state, _ = env.step(current_selected_word, current_state)
-                agent.update_replay_memory(((current_state, candidate_vec, new_state), 1, done, subspace, visited_word.copy(), step))
+                agent.update_replay_memory(((current_state, candidate_vec, new_state), 1, 1, subspace, visited_word.copy(), step))
                 agent.train(1)
                 episode_reward = 1
                 break
@@ -229,6 +229,7 @@ if __name__=='__main__':
 
         writer.add_scalar("Reward", episode_reward, episodes)
         writer.add_scalar("Steps Taken", step, episodes)
+        writer.add_scalar("Epsilon", decaying_epsilon, episodes)
 
 
 
