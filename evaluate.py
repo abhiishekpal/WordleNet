@@ -13,7 +13,7 @@ import json
 env = Wordle()
 
 agent = Agent()
-agent.model.load_state_dict(torch.load('wordle-densev4.7.pt'))
+agent.model.load_state_dict(torch.load('wordle-dense.v5.pt'))
 
 
 total_solved = 0
@@ -28,7 +28,7 @@ for iter in range(100):
     steps_transitioned[iter] = {"goal": env.goal_word, "steps": []}
     candidates = list(env.CANDIDATE_SPACE)
     random.shuffle(candidates)
-    subspace = candidates[:50]
+    subspace = candidates[:200] 
 
     
     while not done:
@@ -39,11 +39,15 @@ for iter in range(100):
         subspace2 = list(set(subspace + [env.goal_word]))
         random.shuffle(subspace2)
 
+        all_states = []                
         for cand in (subspace2):
             candidate_vec = get_candidate_vec(cand)
             fused_state = fuse_array(current_state, candidate_vec)
-            scores.append(agent.get_qs((fused_state)).cpu().numpy())
-        action = np.argmax(scores)
+            all_states.append(fused_state)
+        final_fused_state = torch.concat(all_states, dim=0)
+        scores = agent.get_qs(final_fused_state).squeeze()
+        action = torch.argmax(scores, dim=0)
+
         current_selected_word = list(subspace2)[action]
         visited_word.add(current_selected_word)
 

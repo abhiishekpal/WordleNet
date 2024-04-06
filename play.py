@@ -19,7 +19,7 @@ MIN_REPLAY_MEMORY_SIZE = 100
 MINIBATCH_SIZE = 64
 DISCOUNT = 0.5
 UPDATE_TARGET_EVERY = 500
-EPISODES = 30000
+EPISODES = 100000
 
 
 # Define helper functions that are to be used
@@ -182,17 +182,19 @@ if __name__=='__main__':
         step = 1
         while(1):
             random.shuffle(cand_space)
-            subspace = list(set(cand_space[:20]+[env.goal_word]).difference(visited_word))
+            subspace = list(set(cand_space[:50]+[env.goal_word]).difference(visited_word))
             random.shuffle(subspace)
 
             # choosing the best word with some randomness added
             if np.random.random() > decaying_epsilon:
-                scores = []                
+                all_states = []                
                 for cand in (subspace):
                     candidate_vec = get_candidate_vec(cand)
                     fused_state = fuse_array(current_state, candidate_vec)
-                    scores.append(agent.get_qs((fused_state)).cpu().numpy())
-                action = np.argmax(scores)
+                    all_states.append(fused_state)
+                final_fused_state = torch.concat(all_states, dim=0)
+                scores = agent.get_qs(final_fused_state).squeeze()
+                action = torch.argmax(scores, dim=0)
             else:
                 action = np.random.randint(0, len(subspace))
             
@@ -223,7 +225,7 @@ if __name__=='__main__':
                 break
             step += 1
             if episodes%50==1:
-                torch.save(agent.model.state_dict(), "wordle-densev4.7.pt")
+                torch.save(agent.model.state_dict(), "wordle-dense.v5.pt")
 
         writer.add_scalar("Reward", episode_reward, episodes)
         writer.add_scalar("Steps Taken", step, episodes)
