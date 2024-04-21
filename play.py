@@ -175,7 +175,7 @@ if __name__=='__main__':
         cand_space = list(env.CANDIDATE_SPACE)
 
         # fix a decaying epsilon for each game
-        epsilon, decay_period, warmup_steps = 0.2, 5, 3
+        epsilon, decay_period, warmup_steps = 0.01, 15000, 1000
         decaying_epsilon = linearly_decaying_epsilon(decay_period, episodes, warmup_steps, epsilon)
 
         # starting stepping in the game
@@ -225,7 +225,7 @@ if __name__=='__main__':
                 break
             step += 1
             if episodes%50==1:
-                torch.save(agent.model.state_dict(), "wordle-dense.v5.pt")
+                torch.save(agent.model.state_dict(), "wordle-dense.v6.pt")
 
         writer.add_scalar("Reward", episode_reward, episodes)
         writer.add_scalar("Steps Taken", step, episodes)

@@ -13,7 +13,7 @@ import json
 env = Wordle()
 
 agent = Agent()
-agent.model.load_state_dict(torch.load('wordle-dense.v5.pt'))
+agent.model.load_state_dict(torch.load('wordle-dense.v6.pt'))
 
 
 total_solved = 0
